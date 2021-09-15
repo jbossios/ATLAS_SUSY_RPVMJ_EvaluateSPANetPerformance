@@ -15,22 +15,27 @@ Versions = {
 # See performance of v16 or v11
 #  'v16' : 'lr=0.0001,epochs=200,#jets>=8',
 #  'v11' : 'lr=0.0001,epochs=200',
+#  'v11'              : 'Reference',
+  'v11_reproduction' : 'Validation',
+#  'v24'              : 'SameStatsPerMass',
+#  'v25'              : 'SameStatsPerMass',
 # Compare softmin vs min
 #  'v11' : '(softmin)',
 #  'v17' : '(min)',
 # Compare performance when using different learning_rate_cycles values
-  'v11' : 'learning_rate_cycles = 0',
-  'v18' : 'learning_rate_cycles = 1',
-  'v19' : 'learning_rate_cycles = 2',
-  'v20' : 'learning_rate_cycles = 3',
-  'v21' : 'learning_rate_cycles = 4',
-  'v22' : 'learning_rate_cycles = 5',
-  'v23' : 'learning_rate_cycles = 6',
+#  'v11' : 'learning_rate_cycles = 0',
+#  'v18' : 'learning_rate_cycles = 1',
+#  'v19' : 'learning_rate_cycles = 2',
+#  'v20' : 'learning_rate_cycles = 3',
+#  'v21' : 'learning_rate_cycles = 4',
+#  'v22' : 'learning_rate_cycles = 5',
+#  'v23' : 'learning_rate_cycles = 6',
 }
 
 Samples = {
   'Pred' : '/home/jbossios/cern/SUSY/RPVMJ/SPANet_outputs/H5predictions/VERSION/signal_testing_VERSIONFLAVOUR_output.h5',
-  'True' : '/home/jbossios/cern/SUSY/RPVMJ/CreateH5inputs/Outputs/Signal/v4/FLAVOURSignalData_testing.h5',
+  'True' : '/home/jbossios/cern/SUSY/RPVMJ/CreateH5inputs/Git/Outputs/Signal/v4/FLAVOURSignalData_testing.h5',
+#  'True' : '/home/jbossios/cern/SUSY/RPVMJ/CreateH5inputs/Git/Outputs/Signal/v7/FLAVOURSignalData_testing.h5',
 #  'True' : '/home/jbossios/cern/SUSY/RPVMJ/CreateH5inputs/Outputs/Signal/v5/AllSignalData_testing.h5',
 #  'True' : '/home/jbossios/cern/SUSY/RPVMJ/CreateH5inputs/Outputs/Signal/v6/AllSignalData_testing.h5',
 }
@@ -282,6 +287,11 @@ for version in Versions:
   Graph = ROOT.TGraph(len(x),array.array('d',x),array.array('d',y))
   Graph.SetLineColor(Colors[counter])
   Graph.SetMarkerColor(Colors[counter])
+  # save Graph to a ROOT file
+  os.system('mkdir -p Outputs/{}'.format(version))
+  outFile = ROOT.TFile('Outputs/{}/2gEfficiency_vs_gluino_mass_Full.root'.format(version),'RECREATE')
+  Graph.Write()
+  outFile.Close()
   MG.Add(Graph)
   extra  = ' {}'.format(Versions[version]) if Versions[version] != '' else ''
   legend = 'SPANet vs mass{}'.format(extra)
@@ -654,6 +664,18 @@ if CompareFlavourTypes and len(Versions) == 1:
   Legends.Draw('same')
   Canvas.Print(outName)
   Canvas.Print(outName+']')
+
+
+# Show number of events for each mass point
+Nevents = 0
+if 'v11' in Versions:
+  x = [mass for mass in Masses if mass!='All']
+  y = [EvtFrac_Num['v11']['all'][mass][MainJetMult]['all'] for mass in Masses if mass!='All']
+  for i in range(len(x)):
+    print('Mass: {}'.format(x[i]))
+    print('Nevents: {}'.format(y[i]))
+    Nevents += y[i]
+  print('Total number of events: {}'.format(Nevents))
 
 print('>>> ALL DONE <<<')
 
