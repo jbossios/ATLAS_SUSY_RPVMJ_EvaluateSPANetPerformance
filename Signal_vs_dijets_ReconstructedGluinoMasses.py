@@ -5,11 +5,11 @@ import numpy as np
 
 VERSIONS = {
   # 1.4 TeV + max8jets
-  #'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
-  #'signal': 'v33', # 1.4 TeV + max8jets + normweight
+  'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
+  'signal': 'v33', # 1.4 TeV + max8jets + normweight
   # all masses + max8 jets
-  'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
-  'signal': 'v32', # all masses + max8jets + normweight
+  #'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
+  #'signal': 'v32', # all masses + max8jets + normweight
 }
 
 DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded/python/'
@@ -132,6 +132,10 @@ def compare_hists(hists: dict(), use_avg: bool = True):
   Canvas.Print(outName+']')
 
 if __name__ == '__main__':
+  
+  # Setup
+  use_avg = False
+  use_dijets = False
 
   # AtlasStyle
   ROOT.gROOT.LoadMacro("/afs/cern.ch/user/j/jbossios/work/public/xAOD/Results/AtlasStyle/AtlasStyle.C")
@@ -139,26 +143,32 @@ if __name__ == '__main__':
   ROOT.gROOT.SetBatch(True)
 
   # Get Signal histogram
-  use_avg = False
   print('INFO: Processing signal inputs...')
-  hists = {'Signal': make_hist('Signal', get_reco_gluino_masses('Signal', SAMPLES['Signal'], use_avg))}
+  masses, wgts = get_reco_gluino_masses('Signal', SAMPLES['Signal'], use_avg)
+  hists = {'Signal': make_hist('Signal', (masses, wgts))}
+
+  # Prepare Signal Pred input for Anthony
+  np.savez(f'Outputs/SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.npz', mass=masses['Pred'], weights=wgts['Pred'])
 
   # Get Dijets histogram (un-comment and test once I have new dijet inputs)
-  dijet_masses = {'Pred': []}
-  dijet_wgts = {'Pred': []}
-  print('INFO: Processing dijet inputs...')
-  for i in range(2, 13): # loop over JZ slices
-    for h5_file in os.listdir(f'{DJ_in_path}/JZ{i}/'):
-      if 'spanet' not in h5_file: continue # skip other formats
-      true_file = f'{DJ_in_path}/JZ{i}/{h5_file}'
-      jz_slice = f'0{i}' if i < 10 else i
-      rtag = [tag for tag in ['r9364', 'r10201', 'r10724'] if tag in h5_file][0]
-      file_ext = '.'.join(h5_file.split('.')[4:6])
-      pred_file = f'{DJ_out_path}/dijets_{VERSIONS["spanet"]}_output_3647{jz_slice}_{rtag}_{file_ext}.h5'
-      dijets_dict = {'True': true_file, 'Pred': pred_file}
-      masses, wgts = get_reco_gluino_masses('Dijets', dijets_dict)
-      dijet_masses['Pred'] += masses['Pred']
-      dijet_wgts['Pred'] += wgts['Pred']
-  hists['Dijets'] = make_hist('Dijets', (dijet_masses, dijet_wgts))
+  if use_dijets:
+    dijet_masses = {'Pred': []}
+    dijet_wgts = {'Pred': []}
+    print('INFO: Processing dijet inputs...')
+    for i in range(2, 13): # loop over JZ slices
+      for h5_file in os.listdir(f'{DJ_in_path}/JZ{i}/'):
+        if 'spanet' not in h5_file: continue # skip other formats
+        true_file = f'{DJ_in_path}/JZ{i}/{h5_file}'
+        jz_slice = f'0{i}' if i < 10 else i
+        rtag = [tag for tag in ['r9364', 'r10201', 'r10724'] if tag in h5_file][0]
+        file_ext = '.'.join(h5_file.split('.')[4:6])
+        pred_file = f'{DJ_out_path}/dijets_{VERSIONS["spanet"]}_output_3647{jz_slice}_{rtag}_{file_ext}.h5'
+        dijets_dict = {'True': true_file, 'Pred': pred_file}
+        masses, wgts = get_reco_gluino_masses('Dijets', dijets_dict)
+        dijet_masses['Pred'] += masses['Pred']
+        dijet_wgts['Pred'] += wgts['Pred']
+    hists['Dijets'] = make_hist('Dijets', (dijet_masses, dijet_wgts))
+
+  # Compare histograms
   compare_hists(hists, use_avg)
   print('>>> ALL DONE <<<')
