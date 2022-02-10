@@ -2,14 +2,20 @@ import h5py
 import os
 import ROOT
 import numpy as np
+from multiprocessing import Pool
+from functools import partial
+from compare_hists import compare_hists
 
 VERSIONS = {
   # 1.4 TeV + max8jets
-  'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
-  'signal': 'v33', # 1.4 TeV + max8jets + normweight
+  #'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
+  #'signal': 'v33', # 1.4 TeV + max8jets + normweight
   # all masses + max8 jets
   #'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
   #'signal': 'v32', # all masses + max8jets + normweight
+  # all masses + max8 jets
+  'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
+  'signal': 'v38', # all masses + max8jets + normweight (testing+training=full)
 }
 
 DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded/python/'
@@ -17,16 +23,19 @@ DJ_out_path = f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2
 
 SAMPLES = {
   'Signal' : { # case : H5 file
-    'True' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_inputs/signal_UDB_UDS_testing_{VERSIONS["signal"]}.h5', # max8jets including normweight
-    'Pred' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_Predictions/Signal/{VERSIONS["spanet"]}/signal_testing_{VERSIONS["spanet"]}_output.h5',
+    #'True' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_inputs/signal_UDB_UDS_testing_{VERSIONS["signal"]}.h5', # max8jets including normweight
+    #'Pred' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_Predictions/Signal/{VERSIONS["spanet"]}/signal_testing_{VERSIONS["spanet"]}_output.h5',
+    'True' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_inputs/signal_UDB_UDS_full_{VERSIONS["signal"]}.h5', # max8jets including normweight
+    'Pred' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_Predictions/Signal/{VERSIONS["spanet"]}/signal_full_{VERSIONS["spanet"]}_output.h5',
   },
 }
 
-def get_reco_gluino_masses(case: str, case_dict: dict, use_avg: bool = True) -> tuple[dict, [float]]:
+def get_reco_gluino_masses(case_dict: dict, case: str, use_avg: bool = True) -> tuple[dict, [float]]:
   """ Save reconstructed masses using true matched jets for '2g' events """
   RecoMasses2g = dict()
 
   # Open H5DF files and get data
+  #print(f'INFO: Will open files in {case_dict}')
   Files = {level: h5py.File(file_name, 'r') for level, file_name in case_dict.items()}
   groups = {
     'True': ['source', 'g1', 'g2', 'normweight'],
@@ -81,61 +90,74 @@ def get_reco_gluino_masses(case: str, case_dict: dict, use_avg: bool = True) -> 
         if use_avg:
           RecoMasses2g[level].append(0.5 * (masses['g1'] + masses['g2']))
           normweight[level].append(normweight_tmp[ievent])
+  for level, ifile in Files.items():
+    ifile.close()
   return RecoMasses2g, normweight
 
-def make_hist(case: str, masses_tuple: tuple) -> ROOT.TH1D:
+def make_hist(case: str, masses_tuple: tuple) -> dict:
   masses_dict, wgt_dict = masses_tuple
   hists = dict()
   for level, masses in masses_dict.items():
-    if case == 'Dijets' and level == 'True': continue
+    if 'Dijets' in case and level == 'True': continue
     hist = ROOT.TH1D(f'{case}_{level}', '', 500, 0, 5000)
     for counter, value in enumerate(masses):
-      hist.Fill(value, wgt_dict[level][counter])
+      hist.Fill(value, wgt_dict[level][counter].item())
     hists[level] = hist
   return hists
 
-def compare_hists(hists: dict(), use_avg: bool = True):
-  if not os.path.exists('Plots'):
-    os.makedirs('Plots')
+def merge_hists(hists: [dict], name: str) -> dict:
+  merged_hists = {key: 0 for key in hists[0].keys()}
+  for key in hists[0].keys(): # loop over True/Pred
+    for counter, hdict in enumerate(hists): # loop ver histograms
+      if counter == 0:
+        merged_hist = hdict[key].Clone(f'{name}_{key}')
+      else:
+        merged_hist.Add(hdict[key])
+    merged_hists[key] = merged_hist
+  return merged_hists
 
-  colors = [ROOT.kBlack, ROOT.kRed, ROOT.kMagenta]
-  
-  # TCanvas
-  Canvas = ROOT.TCanvas()
-  comparison = '_vs_'.join(hists.keys())
-  versions = f'spanet_{VERSIONS["spanet"]}_signal_{VERSIONS["signal"]}'
-  extra = '_avg' if use_avg else ''
-  outName = f"Plots/RecoMass_{comparison}_{versions}_2g{extra}.pdf"
-  Canvas.Print(outName+"[")
-  Canvas.SetLogy()
-  Stack = ROOT.THStack()
-  Legends = ROOT.TLegend(0.7,0.7,0.92,0.9)
-  Legends.SetTextFont(42)
-  counter = 0
-  for case, case_dict in hists.items():
-    for level, hist in case_dict.items():
-      hist.SetLineColor(colors[counter])
-      hist.SetMarkerColor(colors[counter])
-      Stack.Add(hist, 'HIST][')
-      Legends.AddEntry(hist, f'{case}_{level}')
-      counter += 1
-  Stack.Draw('nostack')
-  if use_avg:
-    Stack.GetXaxis().SetTitle('Averaged reconstructed gluino Mass [GeV]')
-  else:
-    Stack.GetXaxis().SetTitle('Reconstructed gluino Mass [GeV]')
-  Stack.GetYaxis().SetTitle('Number of events')
-  Legends.Draw("same")
-  Canvas.Update()
-  Canvas.Modified()
-  Canvas.Print(outName)
-  Canvas.Print(outName+']')
+#def compare_hists(hists: dict(), use_avg: bool = True):
+#  if not os.path.exists('Plots'):
+#    os.makedirs('Plots')
+#
+#  colors = [ROOT.kBlack, ROOT.kRed, ROOT.kMagenta]
+#  
+#  # TCanvas
+#  Canvas = ROOT.TCanvas()
+#  comparison = '_vs_'.join(hists.keys())
+#  versions = f'spanet_{VERSIONS["spanet"]}_signal_{VERSIONS["signal"]}'
+#  extra = '_avg' if use_avg else ''
+#  outName = f"Plots/RecoMass_{comparison}_{versions}_2g{extra}.pdf"
+#  Canvas.Print(outName+"[")
+#  Canvas.SetLogy()
+#  Stack = ROOT.THStack()
+#  Legends = ROOT.TLegend(0.7,0.75,0.92,0.92)
+#  Legends.SetTextFont(42)
+#  counter = 0
+#  for case, case_dict in hists.items():
+#    for level, hist in case_dict.items():
+#      hist.SetLineColor(colors[counter])
+#      hist.SetMarkerColor(colors[counter])
+#      Stack.Add(hist, 'HIST][')
+#      Legends.AddEntry(hist, f'{case}_{level}')
+#      counter += 1
+#  Stack.Draw('nostack')
+#  if use_avg:
+#    Stack.GetXaxis().SetTitle('Averaged reconstructed gluino Mass [GeV]')
+#  else:
+#    Stack.GetXaxis().SetTitle('Reconstructed gluino Mass [GeV]')
+#  Stack.GetYaxis().SetTitle('Number of events')
+#  Legends.Draw("same")
+#  Canvas.Update()
+#  Canvas.Modified()
+#  Canvas.Print(outName)
+#  Canvas.Print(outName+']')
 
 if __name__ == '__main__':
   
   # Setup
   use_avg = False
-  use_dijets = False
+  use_dijets = True
 
   # AtlasStyle
   ROOT.gROOT.LoadMacro("/afs/cern.ch/user/j/jbossios/work/public/xAOD/Results/AtlasStyle/AtlasStyle.C")
@@ -144,31 +166,63 @@ if __name__ == '__main__':
 
   # Get Signal histogram
   print('INFO: Processing signal inputs...')
-  masses, wgts = get_reco_gluino_masses('Signal', SAMPLES['Signal'], use_avg)
+  masses, wgts = get_reco_gluino_masses(SAMPLES['Signal'], 'Signal', use_avg)
   hists = {'Signal': make_hist('Signal', (masses, wgts))}
 
   # Prepare Signal Pred input for Anthony
-  np.savez(f'Outputs/SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.npz', mass=masses['Pred'], weights=wgts['Pred'])
+  np.savez(f'Outputs/SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.npz', mass_pred=masses['Pred'], mass_true=masses['True'], weights_pred=wgts['Pred'], weights_true=wgts['True'])
 
   # Get Dijets histogram (un-comment and test once I have new dijet inputs)
   if use_dijets:
-    dijet_masses = {'Pred': []}
-    dijet_wgts = {'Pred': []}
     print('INFO: Processing dijet inputs...')
+    dijets_hists = []
     for i in range(2, 13): # loop over JZ slices
+    #for i in range(4, 5): # loop over JZ slices
+      if i == 4: continue # Temporary: skip problematic slice
+      print(f'        Processing JZ{i} inputs...')
+      dijets_dicts = []
       for h5_file in os.listdir(f'{DJ_in_path}/JZ{i}/'):
         if 'spanet' not in h5_file: continue # skip other formats
+        #if '000201' in h5_file: continue # Temporary (skipping problematic input files) FIXME
         true_file = f'{DJ_in_path}/JZ{i}/{h5_file}'
         jz_slice = f'0{i}' if i < 10 else i
         rtag = [tag for tag in ['r9364', 'r10201', 'r10724'] if tag in h5_file][0]
         file_ext = '.'.join(h5_file.split('.')[4:6])
         pred_file = f'{DJ_out_path}/dijets_{VERSIONS["spanet"]}_output_3647{jz_slice}_{rtag}_{file_ext}.h5'
-        dijets_dict = {'True': true_file, 'Pred': pred_file}
-        masses, wgts = get_reco_gluino_masses('Dijets', dijets_dict)
-        dijet_masses['Pred'] += masses['Pred']
-        dijet_wgts['Pred'] += wgts['Pred']
-    hists['Dijets'] = make_hist('Dijets', (dijet_masses, dijet_wgts))
+        dijets_dicts.append({'True': true_file, 'Pred': pred_file})
+      # Divide huge list into small lists
+      n_dicts = len(dijets_dicts)
+      step_size = 10
+      n_lists_int = int(n_dicts/step_size)
+      n_lists_real = n_lists_int - step_size*n_lists_int
+      n_lists = n_lists_int if not n_lists_real else n_lists_int+1
+      for ilist in range(n_lists):
+        print(f'        Processing events {ilist+1}/{n_lists}...')
+        imin = ilist*step_size
+        if ilist != n_lists-1:
+          imax = (ilist+1)*step_size
+          dijets_dicts_small = dijets_dicts[imin:imax]
+        else:
+          dijets_dicts_small = dijets_dicts[imin:]
+        dijet_masses = {'Pred': []}
+        dijet_wgts = {'Pred': []}
+        with Pool(6) as p:
+          get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Dijets', use_avg = use_avg)
+          result = p.map(get_reco_gluino_masses_partial, dijets_dicts_small)
+        dijet_masses['Pred'] = [value for item in result for value in item[0]['Pred']]
+        dijet_wgts['Pred'] = [value for item in result for value in item[1]['Pred']]
+        dijets_hists.append(make_hist(f'Dijets_JZ{i}_{ilist}', (dijet_masses, dijet_wgts)))
+      # Prepare Dijets Pred input for Anthony
+      np.savez(f'Outputs/SPANet_{VERSIONS["spanet"]}_Dijets_JZ{i}{"_avg" if use_avg else ""}.npz', mass_pred=dijet_masses['Pred'], weights_pred=dijet_wgts['Pred'])
+    hists['Dijets'] = merge_hists(dijets_hists, 'Dijets')
+
+  # Write histograms
+  out_file = ROOT.TFile(f'Outputs/Histograms_SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.root', 'RECREATE')
+  for case, hdict in hists.items(): # loop over Signal/Dijets
+    for key, hist in hdict.items(): # loop over True/Pred
+      hist.Write()
+  out_file.Close()
 
   # Compare histograms
-  compare_hists(hists, use_avg)
+  compare_hists(hists, VERSIONS, use_avg)
   print('>>> ALL DONE <<<')
