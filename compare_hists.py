@@ -26,6 +26,7 @@ def compare_hists(hists: dict(), VERSIONS, use_avg: bool = True):
   counter = 0
   for case, case_dict in hists.items():
     for level, hist in case_dict.items():
+      hist.Rebin(5)
       hist.SetLineColor(colors[counter])
       hist.SetMarkerColor(colors[counter])
       Stack.Add(hist, 'HIST][')
