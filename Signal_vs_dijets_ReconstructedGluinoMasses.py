@@ -6,20 +6,32 @@ from multiprocessing import Pool
 from functools import partial
 from compare_hists import compare_hists
 
+# TODO
+# FIXME
+# UPDATEME
+# Need to start using the new dijet inputs (now not separated into JZ slices!)
+
 VERSIONS = {
-  # 1.4 TeV + max8jets
-  'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
-  'signal': 'v39', # 1.4 TeV + max8jets + normweight
-  # all masses + max8 jets (testing signal data only)
+  ## 1.4 TeV + max8jets
+  #'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
+  #'signal': 'v39', # 1.4 TeV + max8jets + normweight
+  ## all masses + max8 jets (testing signal data only)
   #'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
   #'signal': 'v32', # all masses + max8jets + normweight
-  # all masses + max8 jets (full signal data)
+  ## all masses + max8 jets (full signal data)
   #'spanet': 'v60', # spanet trained with v24 signal (all masses + max8jets + partial events)
   #'signal': 'v38', # all masses + max8jets + normweight (testing+training=full)
+  ## 1.4 TeV + max8jets + 50 GeV cut
+  #'spanet': 'v71', # spanet trained with v40 signal (1.4 TeV + max8jets + partial events + 50 GeV cut)
+  #'signal': 'v40', # 1.4 TeV + max8jets + fixed normweight + 50 GeV cut
+  # 1.4 TeV + max8jets + 50 GeV cut
+  'spanet': 'v70', # spanet trained with v40 signal (1.4 TeV + max8jets + 2g events + 50 GeV cut)
+  'signal': 'v40', # 1.4 TeV + max8jets + fixed normweight + 50 GeV cut
 }
 
-DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded/python/'
-DJ_out_path = f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_Predictions/Dijets/{VERSIONS["spanet"]}/'
+# Dijets inputs
+DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded_fixed/python/'
+DJ_out_path = f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/ML_Pipelines_Dijets_Outputs/{VERSIONS["spanet"]}/'
 
 SAMPLES = {
   'Signal' : { # case : H5 file
@@ -29,6 +41,9 @@ SAMPLES = {
     'Pred' : f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/SPANET_Predictions/Signal/{VERSIONS["spanet"]}/signal_full_{VERSIONS["spanet"]}_output.h5',
   },
 }
+
+# Path to output npz and root files
+OUT_PATH = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/Outputs_spanet_eval'
 
 def get_reco_gluino_masses(case_dict: dict, case: str, use_avg: bool = True) -> tuple[dict, [float]]:
   """ Save reconstructed masses using true matched jets for '2g' events """
@@ -108,7 +123,7 @@ def merge_hists(hists: [dict], name: str) -> dict:
   merged_hists = {key: 0 for key in hists[0].keys()}
   for key in hists[0].keys(): # loop over True/Pred
     for counter, hdict in enumerate(hists): # loop ver histograms
-      if counter == 0:
+      if not counter:
         merged_hist = hdict[key].Clone(f'{name}_{key}')
       else:
         merged_hist.Add(hdict[key])
@@ -132,14 +147,16 @@ if __name__ == '__main__':
   hists = {'Signal': make_hist('Signal', (masses, wgts))}
 
   # Prepare Signal Pred input for Anthony
-  output_folder = f'Outputs/npz_files/{VERSIONS["spanet"]}/'
+  output_folder = f'{OUT_PATH}/npz_files/{VERSIONS["spanet"]}/Signal'
   if not os.path.exists(output_folder):
     os.makedirs(output_folder)
-  np.savez(f'Outputs/npz_files/{VERSIONS["spanet"]}/SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.npz', mass_pred=masses['Pred'], mass_true=masses['True'], weights_pred=wgts['Pred'], weights_true=wgts['True'])
+  output_file_name = f'{output_folder}/SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.npz'
+  print(f'INFO: Creating {output_file_name}')
+  np.savez(output_file_name, mass_pred=masses['Pred'], mass_true=masses['True'], weights_pred=wgts['Pred'], weights_true=wgts['True'])
 
   # Get Dijets histogram
   if use_dijets:
-    output_folder = f'Outputs/npz_files/{VERSIONS["spanet"]}/Dijets/'
+    output_folder = f'{OUT_PATH}/npz_files/{VERSIONS["spanet"]}/Dijets'
     if not os.path.exists(output_folder):
       os.makedirs(output_folder)
     print('INFO: Processing dijet inputs...')
@@ -163,6 +180,8 @@ if __name__ == '__main__':
       n_extra_files = n_lists_int*step_size - n_dicts
       n_lists = n_lists_int if not n_extra_files else n_lists_int+1
       print(f'{n_lists = }')
+      dijet_masses = {'Pred': []}
+      dijet_wgts = {'Pred': []}
       for ilist in range(n_lists):
         print(f'        Processing events {ilist+1}/{n_lists}...')
         imin = ilist*step_size
@@ -171,20 +190,28 @@ if __name__ == '__main__':
           dijets_dicts_small = dijets_dicts[imin:imax]
         else:
           dijets_dicts_small = dijets_dicts[imin:]
-        dijet_masses = {'Pred': []}
-        dijet_wgts = {'Pred': []}
         with Pool(8) as p:
           get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Dijets', use_avg = use_avg)
           result = p.map(get_reco_gluino_masses_partial, dijets_dicts_small)
-        dijet_masses['Pred'] = [value for item in result for value in item[0]['Pred']]
-        dijet_wgts['Pred'] = [value for item in result for value in item[1]['Pred']]
-        dijets_hists.append(make_hist(f'Dijets_JZ{i}_{ilist}', (dijet_masses, dijet_wgts)))
+        dijet_masses_dict = {'Pred': [value for item in result for value in item[0]['Pred']]}
+        dijet_wgts_dict = {'Pred': [value for item in result for value in item[1]['Pred']]}
+        dijets_hists.append(make_hist(f'Dijets_JZ{i}_{ilist}', (dijet_masses_dict, dijet_wgts_dict)))
+        # collect data to save it to a .npz file
+        dijet_masses['Pred'] += dijet_masses_dict['Pred']
+        dijet_wgts['Pred'] += dijet_wgts_dict['Pred']
       # Prepare Dijets Pred input for Anthony
-      np.savez(f'Outputs/npz_files/{VERSIONS["spanet"]}/Dijets/SPANet_{VERSIONS["spanet"]}_Dijets_JZ{i}{"_avg" if use_avg else ""}.npz', mass_pred=dijet_masses['Pred'], weights_pred=dijet_wgts['Pred'])
+      output_file_name = f'{output_folder}/SPANet_{VERSIONS["spanet"]}_Dijets_JZ{i}{"_avg" if use_avg else ""}.npz'
+      print(f'INFO: Creating {output_file_name}')
+      np.savez(output_file_name, mass_pred=dijet_masses['Pred'], weights_pred=dijet_wgts['Pred'])
     hists['Dijets'] = merge_hists(dijets_hists, 'Dijets')
 
   # Write histograms
-  out_file = ROOT.TFile(f'Outputs/root_files/Histograms_SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.root', 'RECREATE')
+  output_folder = f'{OUT_PATH}/root_files'
+  if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+  output_file_name = f'root://eosatlas.cern.ch/{output_folder}/Histograms_SPANet_{VERSIONS["spanet"]}_Signal_{VERSIONS["signal"]}{"_avg" if use_avg else ""}.root'
+  print(f'INFO: Creating {output_file_name}')
+  out_file = ROOT.TFile(output_file_name, 'RECREATE')
   for case, hdict in hists.items(): # loop over Signal/Dijets
     for key, hist in hdict.items(): # loop over True/Pred
       hist.Write()

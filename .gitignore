@@ -1,2 +1,6 @@
 Plots/
 Outputs/
+.asetup.save
+Log*
+__pycache__/
+rpv-ml-jet-matching-common/
