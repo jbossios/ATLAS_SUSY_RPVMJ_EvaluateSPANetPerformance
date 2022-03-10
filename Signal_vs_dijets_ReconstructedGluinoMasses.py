@@ -6,11 +6,6 @@ from multiprocessing import Pool
 from functools import partial
 from compare_hists import compare_hists
 
-# TODO
-# FIXME
-# UPDATEME
-# Need to start using the new dijet inputs (now not separated into JZ slices!)
-
 VERSIONS = {
   ## 1.4 TeV + max8jets
   #'spanet': 'v69', # spanet trained with v29 signal (1.4 TeV + max8jets + partial events)
@@ -30,7 +25,7 @@ VERSIONS = {
 }
 
 # Dijets inputs
-DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded_fixed/python/'
+DJ_in_path = '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16e/dijets_expanded_fixed/python/pt_geq_50GeV/'
 DJ_out_path = f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/ML_Pipelines_Dijets_Outputs/{VERSIONS["spanet"]}/'
 
 SAMPLES = {
@@ -161,48 +156,46 @@ if __name__ == '__main__':
       os.makedirs(output_folder)
     print('INFO: Processing dijet inputs...')
     dijets_hists = []
-    for i in range(2, 13): # loop over JZ slices
-      print(f'        Processing JZ{i} inputs...')
-      dijets_dicts = []
-      for h5_file in os.listdir(f'{DJ_in_path}/JZ{i}/'):
-        if 'spanet' not in h5_file: continue # skip other formats
-        true_file = f'{DJ_in_path}/JZ{i}/{h5_file}'
-        jz_slice = f'0{i}' if i < 10 else i
-        rtag = [tag for tag in ['r9364', 'r10201', 'r10724'] if tag in h5_file][0]
-        file_ext = '.'.join(h5_file.split('.')[4:6])
-        pred_file = f'{DJ_out_path}/dijets_{VERSIONS["spanet"]}_output_3647{jz_slice}_{rtag}_{file_ext}.h5'
-        dijets_dicts.append({'True': true_file, 'Pred': pred_file})
-      # Divide huge list into small lists
-      n_dicts = len(dijets_dicts)
-      print(f'Number of files = {n_dicts}')
-      step_size = 10
-      n_lists_int = int(n_dicts/step_size)
-      n_extra_files = n_lists_int*step_size - n_dicts
-      n_lists = n_lists_int if not n_extra_files else n_lists_int+1
-      print(f'{n_lists = }')
-      dijet_masses = {'Pred': []}
-      dijet_wgts = {'Pred': []}
-      for ilist in range(n_lists):
-        print(f'        Processing events {ilist+1}/{n_lists}...')
-        imin = ilist*step_size
-        if ilist != n_lists-1:
-          imax = (ilist+1)*step_size
-          dijets_dicts_small = dijets_dicts[imin:imax]
-        else:
-          dijets_dicts_small = dijets_dicts[imin:]
-        with Pool(8) as p:
-          get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Dijets', use_avg = use_avg)
-          result = p.map(get_reco_gluino_masses_partial, dijets_dicts_small)
-        dijet_masses_dict = {'Pred': [value for item in result for value in item[0]['Pred']]}
-        dijet_wgts_dict = {'Pred': [value for item in result for value in item[1]['Pred']]}
-        dijets_hists.append(make_hist(f'Dijets_JZ{i}_{ilist}', (dijet_masses_dict, dijet_wgts_dict)))
-        # collect data to save it to a .npz file
-        dijet_masses['Pred'] += dijet_masses_dict['Pred']
-        dijet_wgts['Pred'] += dijet_wgts_dict['Pred']
-      # Prepare Dijets Pred input for Anthony
-      output_file_name = f'{output_folder}/SPANet_{VERSIONS["spanet"]}_Dijets_JZ{i}{"_avg" if use_avg else ""}.npz'
-      print(f'INFO: Creating {output_file_name}')
-      np.savez(output_file_name, mass_pred=dijet_masses['Pred'], weights_pred=dijet_wgts['Pred'])
+    dijets_dicts = []
+    for h5_file in os.listdir(f'{DJ_in_path}'):
+      if 'spanet' not in h5_file: continue # skip other formats
+      true_file = f'{DJ_in_path}{h5_file}'
+      dsid = h5_file.split('.')[2]
+      rtag = [tag for tag in ['r9364', 'r10201', 'r10724'] if tag in h5_file][0]
+      file_ext = '.'.join(h5_file.split('.')[4:6])
+      pred_file = f'{DJ_out_path}/dijets_{VERSIONS["spanet"]}_output_{dsid}_{rtag}_{file_ext}.h5'
+      dijets_dicts.append({'True': true_file, 'Pred': pred_file})
+    # Divide huge list into small lists
+    n_dicts = len(dijets_dicts)
+    print(f'Number of files = {n_dicts}')
+    step_size = 10
+    n_lists_int = int(n_dicts/step_size)
+    n_extra_files = n_lists_int*step_size - n_dicts
+    n_lists = n_lists_int if not n_extra_files else n_lists_int+1
+    print(f'{n_lists = }')
+    dijet_masses = {'Pred': []}
+    dijet_wgts = {'Pred': []}
+    for ilist in range(n_lists):
+      print(f'        Processing events {ilist+1}/{n_lists}...')
+      imin = ilist*step_size
+      if ilist != n_lists-1:
+        imax = (ilist+1)*step_size
+        dijets_dicts_small = dijets_dicts[imin:imax]
+      else:
+        dijets_dicts_small = dijets_dicts[imin:]
+      with Pool(8) as p:
+        get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Dijets', use_avg = use_avg)
+        result = p.map(get_reco_gluino_masses_partial, dijets_dicts_small)
+      dijet_masses_dict = {'Pred': [value for item in result for value in item[0]['Pred']]}
+      dijet_wgts_dict = {'Pred': [value for item in result for value in item[1]['Pred']]}
+      dijets_hists.append(make_hist(f'Dijets_{dsid}_{ilist}', (dijet_masses_dict, dijet_wgts_dict)))
+      # collect data to save it to a .npz file
+      dijet_masses['Pred'] += dijet_masses_dict['Pred']
+      dijet_wgts['Pred'] += dijet_wgts_dict['Pred']
+    # Prepare Dijets Pred input for Anthony
+    output_file_name = f'{output_folder}/SPANet_{VERSIONS["spanet"]}_Dijets{"_avg" if use_avg else ""}.npz'
+    print(f'INFO: Creating {output_file_name}')
+    np.savez(output_file_name, mass_pred=dijet_masses['Pred'], weights_pred=dijet_wgts['Pred'])
     hists['Dijets'] = merge_hists(dijets_hists, 'Dijets')
 
   # Write histograms
