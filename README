@@ -1,9 +1,0 @@
-Sripts:
-
-1. EvaluatePerformance_ttbar.py
-
-Use this script to evaluate reconstruction efficiency for ttbar
-
-2. EvaluatePerformance_signal.py
-
-Use this script to evaluate reconstruction efficiency for signal
