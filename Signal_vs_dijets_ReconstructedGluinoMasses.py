@@ -52,7 +52,7 @@ PATHS = {
   'Dijets': {
     'spanet_inputs': {
       'path': '/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/ntuples/tag/input/mc16a/dijets/PROD3/h5/v1/',
-      'skip_label': 'jetjet_JZWithSW_SRRPV',  # Temporary
+      'skip_label': 'DijetsALL',
     },
     'spanet_outputs': f'/eos/atlas/atlascerngroupdisk/phys-susy/RPV_mutlijets_ANA-SUSY-2019-24/spanet_jona/ML_Pipelines_Dijets_Outputs/{VERSIONS["spanet"]}/',
   }
@@ -150,6 +150,35 @@ def merge_hists(hists: [dict], name: str) -> dict:
     merged_hists[key] = merged_hist
   return merged_hists
 
+def write_npz(input_file_name, signal_masses, signal_wgts, gcases, use_avg):
+  # Prepare Signal Pred input for Anthony
+  output_file_name = input_file_name.split('/')[-1].replace('.h5', f'_predictedMasses{"_avg" if use_avg else ""}.npz')
+  #output_file_name = f'{output_folder}/SPANet_{VERSIONS["spanet"]}_Signal_{"and".join(SIGNAL_DSIDS)}{"_avg" if use_avg else ""}.npz'
+  output_file_name = f'{output_folder}/{output_file_name}'
+  if gcases == ['avg']:
+    signal_masses_array = signal_masses['avg']['Pred']
+  else:
+    signal_masses_array = np.column_stack((signal_masses['g1']['Pred'], signal_masses['g2']['Pred']))
+  out_dict = {'trees_SRRPV_': {'mass_pred': signal_masses_array}}
+  out_dict['trees_SRRPV_']['weights_pred'] = np.array(signal_wgts['Pred'])
+  np.savez(output_file_name, **out_dict)
+
+def write_h5(input_file_name, signal_masses, signal_wgts, gcases, use_avg):
+  # Prepare Signal Pred input for Anthony
+  output_file_name = input_file_name.split('/')[-1].replace('.h5', f'_predictedMasses{"_avg" if use_avg else ""}.h5')
+  output_file_name = f'{output_folder}/{output_file_name}'
+  if gcases == ['avg']:
+    signal_masses_array = signal_masses['avg']['Pred']
+  else:
+    signal_masses_array = np.column_stack((signal_masses['g1']['Pred'], signal_masses['g2']['Pred']))
+  out_dict = {'trees_SRRPV_': {'mass_pred': signal_masses_array}}
+  out_dict['trees_SRRPV_']['weights_pred'] = np.array(signal_wgts['Pred'])
+  with h5py.File(output_file_name, 'w') as hf:
+    for key, val in out_dict.items():
+      group = hf.create_group(key)
+      for k, v in val.items():
+        group.create_dataset(k, data = v)
+
 if __name__ == '__main__':
   
   # Setup
@@ -185,7 +214,8 @@ if __name__ == '__main__':
   # Divide huge list into small lists
   n_dicts = len(signal_dicts)
   print(f'Number of files = {n_dicts}')
-  step_size = 10
+  #step_size = 10
+  step_size = 1  # Temporary
   n_lists_int = int(n_dicts/step_size)
   n_extra_files = n_lists_int*step_size - n_dicts
   n_lists = n_lists_int if not n_extra_files else n_lists_int+1
@@ -200,14 +230,19 @@ if __name__ == '__main__':
       signal_dicts_small = signal_dicts[imin:imax]
     else:
       signal_dicts_small = signal_dicts[imin:]
-    with Pool(4) as p:
+    #with Pool(4) as p:
+    with Pool(1) as p:  # Temporary
       get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Signal', use_avg = use_avg)
       result = p.map(get_reco_gluino_masses_partial, signal_dicts_small)
     signal_masses_dict = {gcase: {'Pred': [value for item in result for value in item[0]['Pred'][gcase]]} for gcase in gcases}
     signal_wgts_dict = {'Pred': [value for item in result for value in item[1]['Pred']]}
     for gcase in gcases:
       signal_hists[gcase].append(make_hist(f'Signal_{gcase}_{ilist}', (signal_masses_dict[gcase], signal_wgts_dict)))
-    # collect data to save it to a .npz file
+    # save individual npz file
+    if len(signal_dicts_small) == 1:
+      #write_npz(signal_dicts_small[0]['Pred'], signal_masses_dict, signal_wgts_dict, gcases, use_avg)
+      write_h5(signal_dicts_small[0]['Pred'], signal_masses_dict, signal_wgts_dict, gcases, use_avg)
+    # collect data to save it to a full .npz file
     for gcase in gcases:
       signal_masses[gcase]['Pred'] += signal_masses_dict[gcase]['Pred']
     signal_wgts['Pred'] += signal_wgts_dict['Pred']
@@ -257,13 +292,18 @@ if __name__ == '__main__':
         dijets_dicts_small = dijets_dicts[imin:imax]
       else:
         dijets_dicts_small = dijets_dicts[imin:]
-      with Pool(4) as p:
+      #with Pool(4) as p:
+      with Pool(1) as p:  # Temporary
         get_reco_gluino_masses_partial = partial(get_reco_gluino_masses, case = 'Dijets', use_avg = use_avg)
         result = p.map(get_reco_gluino_masses_partial, dijets_dicts_small)
       dijets_masses_dict = {gcase: {'Pred': [value for item in result for value in item[0]['Pred'][gcase]]} for gcase in gcases}
       dijets_wgts_dict = {'Pred': [value for item in result for value in item[1]['Pred']]}
       for gcase in gcases:
         dijets_hists[gcase].append(make_hist(f'Dijets_{gcase}_{ilist}', (dijets_masses_dict[gcase], dijets_wgts_dict)))
+      # save individual npz file
+      if len(signal_dicts_small) == 1:
+        #write_npz(signal_dicts_small[0]['Pred'], signal_masses_dict, signal_wgts_dict, gcases, use_avg)
+        write_h5(signal_dicts_small[0]['Pred'], signal_masses_dict, signal_wgts_dict, gcases, use_avg)
       # collect data to save it to a .npz file
       for gcase in gcases:
         dijets_masses[gcase]['Pred'] += dijets_masses_dict[gcase]['Pred']
